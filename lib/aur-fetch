@@ -100,6 +100,9 @@ if [[ ! -s $orderfile ]]; then
 fi
 
 # git helper functions
+aur_rev() {
+    git rev-parse --quiet --verify "$1"
+}
 aur_rebase() {
     git stash
     git reset --hard 'HEAD'
@@ -108,9 +111,6 @@ aur_rebase() {
 aur_reset() {
     git stash
     git reset --hard 'HEAD@{upstream}'
-}
-aur_rev() {
-    git rev-parse --quiet --verify "$1"
 }
 
 if (( recurse )); then
@@ -127,42 +127,41 @@ fi | while read -r pkg; do
             exit 1
         fi
 
+        if (( results )); then
+            # XXX: include previous FETCH_HEAD in results output?
+            printf 'fetch:%s:file://%s\n' "$(aur_rev 'FETCH_HEAD')" "$PWD/$pkg" | tee -a "$results_file"
+        fi
+
+        # head before rebase or reset
         head_prev=$(aur_rev 'HEAD')
 
+        # set sync to rebase or reset depending on aurutils.rebase configuration
         if [[ $sync == auto ]]; then
             if [[ $(git config --get --type=bool aurutils.rebase) == 'true' ]]; then
                 plain >&2 'aurutils.rebase is set for %s' "$pkg"
 
                 if ! git merge-base --is-ancestor 'HEAD@{upstream}' 'HEAD'; then
-                    aur_rebase
-                else
-                    : no new upstream commits
+                    sync=rebase
                 fi
-            else
-                if [[ $head_prev != $(aur_rev 'HEAD@{upstream}') ]]; then
-                    aur_reset
-                else
-                    : no new upstream commits
-                fi
+
+            elif [[ $head_prev != $(aur_rev 'HEAD@{upstream}') ]]; then
+                sync=reset
             fi
+        fi
 
-        elif [[ $sync == reset ]] || [[ $sync == rebase ]]; then
-            aur_"$sync"
-
-        elif [[ $sync == no ]]; then
-            : ignore new upstream commits
-        fi || {
-            error '%s: %s: Failed to integrate changes' "$argv0" "$pkg"
-            exit 1
-        }
-
-        # Update results file (fetch)
-        if (( results )); then
-            printf 'fetch:file://%s\n' "$PWD/$pkg" | tee -a "$results_file"
+        if [[ $sync == 'rebase' ]] || [[ $sync == 'reset' ]]; then
+            if ! aur_"$sync"; then
+                error '%s: %s: Failed to integrate changes' "$argv0" "$pkg"
+                exit 1
+            fi
+            # XXX: include head_prev in results output?
+            if (( results )); then
+                printf '%s:%s:file://%s\n' "$sync" "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
+            fi
         fi
 
         # Print changes from rebase/reset, if any
-        if [[ $head_prev != $(aur_rev 'HEAD') ]]; then
+        if [[ $head_prev != "$(aur_rev 'HEAD')" ]]; then
             range=${head_prev:+$head_prev..}HEAD
 
             if (( verbose )); then
@@ -185,7 +184,7 @@ fi | while read -r pkg; do
 
         # Update results file (clone)
         if (( results )); then
-            printf 'clone:file://%s\n' "$PWD/$pkg" | tee -a "$results_file"
+            printf 'clone:%s:file://%s\n' "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
         fi
     else
         error '%s: %s: Failed to clone repository' "$argv0" "$pkg"
