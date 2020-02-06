@@ -11,11 +11,10 @@ changelog=aurutils.changelog
 sha256sums=('SKIP')
 conflicts=('aurutils')
 provides=("aurutils=${pkgver%%.r*}")
-depends=('git' 'jq' 'pacutils' 'parallel' 'wget')
+depends=('git' 'jq' 'pacutils' 'wget' 'vifm')
 makedepends=('git')
 optdepends=('bash-completion: bash completion'
-            'devtools: aur-chroot'
-            'vifm: build file interaction')
+            'devtools: aur-chroot')
 
 pkgver() {
     cd aurutils
