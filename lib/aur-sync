@@ -257,7 +257,7 @@ fi
 if [[ -s argv ]]; then
     # shellcheck disable=SC2094
     # $1 pkgname $2 depends $3 pkgbase $4 pkgver
-    xargs --arg-file=argv aur depends --table >depends
+    xargs --arg-file=argv -d'\n' aur depends --table >depends
 else
     plain >&2 "there is nothing to do"
     exit
@@ -314,12 +314,13 @@ fi
 
 if (( download )); then
     msg >&2 "Retrieving package files"
-    parallel -Xj +3 --nice 10 --halt now,fail=1 --keep-order \
-        aur fetch -L "$tmp_view" -S :::: "$tmp"/queue
+    xargs --arg-file="$tmp"/queue -d'\n' aur fetch -L "$tmp_view" -S
 fi
 
 # Link build files in the queue (absolute links)
-parallel -X ln -s "$(pwd -P)"/{} "$tmp_view" :::: "$tmp"/queue
+while read -r name; do
+    [[ $name ]] && printf '%s/%s\0' "$PWD" "$name"
+done < "$tmp"/queue | xargs -0 ln -st "$tmp_view" --
 
 # Explicitly define if exit success is to be trusted (#561)
 trust_exit_success=0
@@ -353,7 +354,9 @@ if (( view )); then
           find "$tmp_view" -maxdepth 1 -type f
 
           # Print build directories in dependency order
-          xargs -I{} -a "$tmp"/queue find -L "$tmp_view"/{} -maxdepth 1
+          while read -r name; do
+              [[ $name ]] && find -L "$tmp_view/$name" -maxdepth 1
+          done < "$tmp"/queue
         } | viewer "$tmp_view"
 
         # Ask for confirmation when viewer() exit success is not trusted (#530, #561)
@@ -367,7 +370,9 @@ if (( build )); then
     aur build --arg-file "$tmp"/queue --database "$db_name" --root "$db_root" \
         "${build_args[@]}" -- "${build_extra_args[@]}"
 else
-    xargs -a "$tmp"/queue -I{} printf '%s\n' "$(pwd -P)"/{}
+    while read -r name; do
+        [[ $name ]] && printf '%s/%s\n' "$PWD" "$name"
+    done < "$tmp"/queue
 fi
 
 # vim: set et sw=4 sts=4 ft=sh:
