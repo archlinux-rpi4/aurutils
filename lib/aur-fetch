@@ -76,6 +76,11 @@ while true; do
     shift
 done
 
+if ! (( $# )); then
+    error '%s: No pkgname given' "$argv0"
+    exit 1
+fi
+
 if [[ -v log_dir ]] && [[ ! -d $log_dir ]]; then
     error '%s: %s: Not a directory' "$argv0" "$log_dir"
     exit 20
@@ -84,11 +89,6 @@ fi
 if [[ -v results_file ]]; then
     : >"$results_file" || exit 1 # truncate file
     results=1
-fi
-
-if ! (( $# )); then
-    error '%s: No pkgname given' "$argv0"
-    exit 1
 fi
 
 # Default to showing PKGBUILD first in patch (#399)
@@ -102,15 +102,6 @@ fi
 # git helper functions
 aur_rev() {
     git rev-parse --quiet --verify "$1"
-}
-aur_rebase() {
-    git stash
-    git reset --hard 'HEAD'
-    git rebase --verbose
-}
-aur_reset() {
-    git stash
-    git reset --hard 'HEAD@{upstream}'
 }
 
 if (( recurse )); then
@@ -129,16 +120,16 @@ fi | while read -r pkg; do
             exit 1
         fi
 
+        # head before rebase or reset
+        prev_head=$(aur_rev 'HEAD')
+
         if (( results )); then
-            # XXX: include previous FETCH_HEAD in results output?
-            printf 'fetch:%s:file://%s\n' "$(aur_rev 'FETCH_HEAD')" "$PWD/$pkg" | tee -a "$results_file"
+            printf 'fetch:%s:%s:file://%s\n' "$prev_head" "$(aur_rev 'FETCH_HEAD')" "$PWD/$pkg" | tee -a "$results_file"
         fi
 
-        # head before rebase or reset
-        head_prev=$(aur_rev 'HEAD')
-
         # set sync to rebase or reset depending on aurutils.rebase configuration
-        if [[ $sync == auto ]]; then
+        # XXX include HEAD in --results output? (mode=auto)
+        if [[ $sync == 'auto' ]]; then
             if [[ $(git config --get --type=bool aurutils.rebase) == 'true' ]]; then
                 plain >&2 'aurutils.rebase is set for %s' "$pkg"
 
@@ -146,25 +137,34 @@ fi | while read -r pkg; do
                     sync=rebase
                 fi
 
-            elif [[ $head_prev != $(aur_rev 'HEAD@{upstream}') ]]; then
+            elif [[ $prev_head != $(aur_rev 'HEAD@{upstream}') ]]; then
                 sync=reset
             fi
         fi
 
-        if [[ $sync == 'rebase' ]] || [[ $sync == 'reset' ]]; then
-            if ! aur_"$sync"; then
-                error '%s: %s: Failed to integrate changes' "$argv0" "$pkg"
+        if [[ $sync == 'rebase' ]]; then
+            if ! { git stash && git reset --hard 'HEAD' && git rebase --verbose; }; then
+                error '%s: Failed to rebase repository %s' "$argv0" "$pkg"
                 exit 1
+
+            elif (( results )); then
+                printf 'rebase:%s:%s:file://%s\n' "$prev_head" "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
             fi
 
-            if (( results )); then
-                printf '%s:%s:file://%s\n' "$sync" "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
+        elif [[ $sync == 'reset' ]]; then
+            if ! { git stash && git reset --hard 'HEAD@{upstream}'; }; then
+                error '%s: %s: Failed to reset repository %s' "$argv0" "$pkg"
+                exit 1
+
+            elif (( results )); then
+                printf 'reset:%s:%s:file://%s\n' "$prev_head" "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
             fi
         fi
 
         # Print changes from rebase/reset, if any
-        if [[ $head_prev != "$(aur_rev 'HEAD')" ]]; then
-            range=${head_prev:+$head_prev..}HEAD
+        # XXX functionality redundant with --results?
+        if [[ $prev_head != "$(aur_rev 'HEAD')" ]]; then
+            range=${prev_head:+$prev_head..}HEAD
 
             if (( verbose )); then
                 git --no-pager "$log_fmt" --patch --stat "$range"
@@ -184,7 +184,7 @@ fi | while read -r pkg; do
 
         # Update results file (clone)
         if (( results )); then
-            printf 'clone:%s:file://%s\n' "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
+            printf 'clone:%s:%s:file://%s\n' '-' "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
         fi
     else
         error '%s: %s: Failed to clone repository' "$argv0" "$pkg"
