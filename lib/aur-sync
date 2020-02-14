@@ -14,7 +14,7 @@ build_extra_args=()
 repo_args=()
 
 # default options (enabled)
-build=1 chkver_depth=2 download=1 view=1 provides=0 graph=1
+build=1 chkver_depth=2 download=1 view=1 provides=0 graph=1 log_fmt=diff
 
 # default options (disabled)
 rotate=0 update=0
@@ -98,7 +98,7 @@ opt_long=('bind:' 'bind-rw:' 'database:' 'repo:' 'directory:' 'ignore:'
           'no-ver-shallow' 'no-view' 'print' 'provides' 'rm-deps'
           'sign' 'temp' 'upgrades' 'pkgver' 'rebuild' 'rebuild-tree'
           'build-command:' 'ignore-file:' 'remove' 'provides-from:'
-          'new' 'prevent-downgrade' 'verify')
+          'new' 'prevent-downgrade' 'verify' 'format:')
 opt_hidden=('dump-options' 'allan' 'ignorearch' 'ignorefile:'
             'noconfirm' 'nover' 'nograph' 'nover-shallow' 'noview'
             'rebuildtree' 'rmdeps' 'gpg-sign')
@@ -116,9 +116,12 @@ while true; do
             rotate=1 ;;
         --continue)
             download=0 ;;
+        --format)
+            shift; log_fmt=$1 ;;
         --ignore)
             shift; IFS=, read -a pkg -r <<< "$1"
-            pkg_i+=("${pkg[@]}") ;;
+            pkg_i+=("${pkg[@]}")
+            unset pkg ;;
         --ignorefile|--ignore-file)
             shift; ignore_file=$1 ;;
         --nograph|--no-graph)
@@ -133,7 +136,8 @@ while true; do
             provides=1 ;;
         --provides-from)
             shift; IFS=, read -a repo -r <<< "$1"
-            repo_p+=("${repo[@]}") ;;
+            repo_p+=("${repo[@]}")
+            unset repo ;;
         -p|--print)
             build=0 ;;
         --rebuild)
@@ -314,13 +318,12 @@ fi
 
 if (( download )); then
     msg >&2 "Retrieving package files"
-    xargs --arg-file="$tmp"/queue -d'\n' aur fetch -L "$tmp_view" -S
-fi
+    xargs -a "$tmp"/queue -d'\n' aur fetch -S --results "$tmp"/fetch_results
 
-# Link build files in the queue (absolute links)
-while read -r name; do
-    [[ $name ]] && printf '%s/%s\0' "$PWD" "$name"
-done < "$tmp"/queue | xargs -0 ln -st "$tmp_view" --
+    while read -r mode rev_old rev path; do
+        : # XXX: process results file
+    done < "$tmp"/fetch_results
+fi
 
 # Check if dependency graph is valid
 if (( graph )); then
@@ -331,7 +334,24 @@ if (( view )); then
     # Avoid directory prefix in printed paths (#452)
     viewer() ( cd "$1"; vifm -c 'set vifminfo=' -c 'view!' -c '0' - )
 
-    # AUR_PAGER exit codes are respected by definition.
+    # Link build files in the queue (absolute links)
+    while read -r pkg; do
+        [[ $pkg ]] && printf '%s/%s\0' "$PWD" "$pkg"
+    done < "$tmp"/queue | xargs -0 ln -st "$tmp_view" --
+
+    # Generate patch files if any of the following is fulfilled:
+    # 1. AUR_SEEN is existing and differs from HEAD
+    # 2. HEAD was updated (git reset, git rebase)
+    while read -r pkg; do
+        seen=$(env -C "$AURDEST/$pkg" git rev-parse --verify -q AUR_SEEN)
+        head=$(env -C "$AURDEST/$pkg" git rev-parse --verify -q HEAD)
+
+        if [[ $seen ]] && [[ $seen != "$head" ]]; then
+            env -C "$AURDEST/$pkg" git --no-pager "$log_fmt" --patch --stat \
+                "$seen..$head" > "$tmp_view/$pkg.$log_fmt"
+        fi
+    done < "$tmp"/queue
+
     if [[ -v AUR_PAGER ]]; then
         # shellcheck disable=SC2086
         command -- $AUR_PAGER "$tmp_view"
@@ -345,6 +365,11 @@ if (( view )); then
           done < "$tmp"/queue
         } | viewer "$tmp_view"
     fi
+
+    # Update AUR_SEEN reference (viewer exited successfully)
+    while IFS=: read -r pkg; do
+        env -C "$AURDEST/$pkg" git update-ref 'AUR_SEEN' 'HEAD'
+    done < "$tmp"/queue
 fi
 
 if (( build )); then
