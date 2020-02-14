@@ -14,7 +14,7 @@ usage() {
 ICAgICAgICAgICAgIC4tLX5+LF9fCjotLi4uLiwtLS0tLS0tYH5+Jy5fLicKIGAtLCwsICAs
 XyAgICAgIDsnflUnCiAgXywtJyAsJ2AtX187ICctLS4KIChfLyd+fiAgICAgICcnJycoOwoK
 !
-    plain >&2 'usage: %s [-L directory] [-Srv] pkgname...' "$argv0"
+    plain >&2 'usage: %s [-Srv] pkgname...' "$argv0"
     exit 1
 }
 
@@ -25,8 +25,8 @@ if [[ ! -v NO_COLOR ]] && [[ ! -v AUR_DEBUG ]]; then
     [[ -t 2 ]] && colorize
 fi
 
-opt_short='rvL:S'
-opt_long=('recurse' 'verbose' 'write-log:' 'sync:' 'results:' 'format:')
+opt_short='rvS'
+opt_long=('recurse' 'verbose' 'sync:' 'results:' 'format:')
 opt_hidden=('dump-options')
 
 if ! parseopts "$opt_short" "${opt_long[@]}" "${opt_hidden[@]}" -- "$@"; then
@@ -37,9 +37,6 @@ set -- "${OPTRET[@]}"
 unset log_dir results_file
 while true; do
     case "$1" in
-        -L|--write-log)
-            shift
-            log_dir=$1 ;;
         -r|--recurse)
             recurse=1 ;;
         -v|--verbose)
@@ -79,11 +76,6 @@ done
 if ! (( $# )); then
     error '%s: No pkgname given' "$argv0"
     exit 1
-fi
-
-if [[ -v log_dir ]] && [[ ! -d $log_dir ]]; then
-    error '%s: %s: Not a directory' "$argv0" "$log_dir"
-    exit 20
 fi
 
 if [[ -v results_file ]]; then
@@ -161,17 +153,12 @@ fi | while read -r pkg; do
             fi
         fi
 
-        # Print changes from rebase/reset, if any
-        # XXX functionality redundant with --results?
+        # Print changes from rebase/reset, if available
         if [[ $prev_head != "$(aur_rev 'HEAD')" ]]; then
             range=${prev_head:+$prev_head..}HEAD
 
             if (( verbose )); then
                 git --no-pager "$log_fmt" --patch --stat "$range"
-            fi
-
-            if [[ $log_dir ]]; then
-                git --no-pager "$log_fmt" --patch --stat "$range" >"$log_dir/$pkg.$log_fmt"
             fi
         fi
 
