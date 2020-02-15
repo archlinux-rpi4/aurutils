@@ -261,7 +261,7 @@ fi
 if [[ -s argv ]]; then
     # shellcheck disable=SC2094
     # $1 pkgname $2 depends $3 pkgbase $4 pkgver
-    xargs --arg-file=argv -d'\n' aur depends --table >depends
+    xargs -a -d'\n' aur depends --table >depends
 else
     plain >&2 "there is nothing to do"
     exit
@@ -320,8 +320,12 @@ if (( download )); then
     msg >&2 "Retrieving package files"
     xargs -a "$tmp"/queue -d'\n' aur fetch -S --results "$tmp"/fetch_results
 
-    while read -r mode rev_old rev path; do
-        : # XXX: process results file
+    while read -r mode rev_old _ path; do
+        path=${path#file://}
+
+        if [[ $mode == 'fetch' ]]; then
+            printf 'create AUR_SEEN %s\n' "$rev_old" | env -C "$path" git update-ref --stdin
+        fi
     done < "$tmp"/fetch_results
 fi
 
@@ -343,11 +347,11 @@ if (( view )); then
     # 1. AUR_SEEN is existing and differs from HEAD
     # 2. HEAD was updated (git reset, git rebase)
     while read -r pkg; do
-        seen=$(env -C "$AURDEST/$pkg" git rev-parse --verify -q AUR_SEEN)
-        head=$(env -C "$AURDEST/$pkg" git rev-parse --verify -q HEAD)
+        seen=$(env -C "$pkg" git rev-parse --verify -q AUR_SEEN)
+        head=$(env -C "$pkg" git rev-parse --verify -q HEAD)
 
         if [[ $seen ]] && [[ $seen != "$head" ]]; then
-            env -C "$AURDEST/$pkg" git --no-pager "$log_fmt" --patch --stat \
+            env -C "$pkg" git --no-pager "$log_fmt" --patch --stat \
                 "$seen..$head" > "$tmp_view/$pkg.$log_fmt"
         fi
     done < "$tmp"/queue
@@ -368,7 +372,7 @@ if (( view )); then
 
     # Update AUR_SEEN reference (viewer exited successfully)
     while IFS=: read -r pkg; do
-        env -C "$AURDEST/$pkg" git update-ref 'AUR_SEEN' 'HEAD'
+        env -C "$pkg" git update-ref 'AUR_SEEN' 'HEAD'
     done < "$tmp"/queue
 fi
 
