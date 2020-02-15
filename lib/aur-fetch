@@ -49,7 +49,7 @@ while true; do
                 auto|reset|rebase|no)
                     sync=$1 ;;
                 *)
-                    error '%s: Invalid --sync option: %s' "$argv0" "$1"
+                    error '%s: invalid --sync option: %s' "$argv0" "$1"
                     usage ;;
             esac ;;
         --results)
@@ -65,7 +65,7 @@ while true; do
 done
 
 if ! (( $# )); then
-    error '%s: No pkgname given' "$argv0"
+    error '%s: no targets specified' "$argv0"
     exit 1
 fi
 
@@ -111,7 +111,6 @@ fi | while read -r pkg; do
         fi
 
         # set sync to rebase or reset depending on aurutils.rebase configuration
-        # XXX include HEAD in --results output? (mode=auto)
         if [[ $sync == 'auto' ]]; then
             if [[ $(git config --get --type=bool aurutils.rebase) == 'true' ]]; then
                 plain >&2 'aurutils.rebase is set for %s' "$pkg"
@@ -127,7 +126,7 @@ fi | while read -r pkg; do
 
         if [[ $sync == 'rebase' ]]; then
             if ! { git stash && git reset --hard 'HEAD' && git rebase --verbose; }; then
-                error '%s: Failed to rebase repository %s' "$argv0" "$pkg"
+                error '%s: failed to rebase repository %s' "$argv0" "$pkg"
                 exit 1
 
             elif (( results )); then
@@ -136,7 +135,7 @@ fi | while read -r pkg; do
 
         elif [[ $sync == 'reset' ]]; then
             if ! { git stash && git reset --hard 'HEAD@{upstream}'; }; then
-                error '%s: %s: Failed to reset repository %s' "$argv0" "$pkg"
+                error '%s: failed to reset repository %s' "$argv0" "$pkg"
                 exit 1
 
             elif (( results )); then
@@ -162,10 +161,10 @@ fi | while read -r pkg; do
 
         # Update results file (clone)
         if (( results )); then
-            printf 'clone:%s:%s:file://%s\n' '-' "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
+            printf 'clone:%d:%s:file://%s\n' 0 "$(aur_rev 'HEAD')" "$PWD/$pkg" | tee -a "$results_file"
         fi
     else
-        error '%s: %s: Failed to clone repository' "$argv0" "$pkg"
+        error '%s: %s: failed to clone repository' "$argv0" "$pkg"
         exit 1
     fi
 done
