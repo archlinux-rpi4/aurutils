@@ -329,9 +329,16 @@ if (( download )); then
     done < "$tmp"/fetch_results
 fi
 
-# Check if dependency graph is valid
 if (( graph )); then
-    aur graph "$tmp_view"/*/.SRCINFO >/dev/null
+    # Concatenate all SRCINFO files to avoid split aur-graph invocations.
+    while read -r pkg; do
+        [[ $pkg ]] && printf '%s/.SRCINFO\n' "$pkg"
+    done < "$tmp"/queue | xargs -d'\n' cat > "$tmp"/queue_info --
+
+    if ! aur graph "$tmp"/queue_info >/dev/null; then
+        error "%s: failed to verify dependency graph" "$argv0"
+        exit 1
+    fi
 fi
 
 if (( view )); then
@@ -371,7 +378,7 @@ if (( view )); then
     fi
 
     # Update AUR_SEEN reference (viewer exited successfully)
-    while IFS=: read -r pkg; do
+    while read -r pkg; do
         env -C "$pkg" git update-ref 'AUR_SEEN' 'HEAD'
     done < "$tmp"/queue
 fi
